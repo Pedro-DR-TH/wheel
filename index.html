@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wheel</title>
+<style>
+  :root { --bg:#14111f; --fg:#f4f1ff; --accent:#ffd34e; }
+  * { box-sizing: border-box; }
+  body {
+    margin:0; min-height:100vh; display:flex; flex-direction:column;
+    align-items:center; justify-content:center; gap:20px;
+    background:var(--bg); color:var(--fg);
+    font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  }
+  h1 { margin:0; font-size:2rem; }
+  #wrap { position:relative; width:min(88vw, 480px); aspect-ratio:1; }
+  canvas { width:100%; height:100%; display:block; }
+  #pointer {
+    position:absolute; top:-10px; left:50%; transform:translateX(-50%);
+    width:0; height:0; border-left:16px solid transparent;
+    border-right:16px solid transparent; border-top:32px solid #fff;
+    filter:drop-shadow(0 2px 3px rgba(0,0,0,.5)); z-index:2;
+  }
+  button {
+    position:relative; width:84px; height:84px; border:0; border-radius:50%;
+    background:#1faa59; cursor:pointer;
+  }
+  /* play-triangle icon instead of text */
+  button::before {
+    content:""; position:absolute; top:50%; left:54%;
+    transform:translate(-50%,-50%);
+    border-left:26px solid #fff; border-top:16px solid transparent;
+    border-bottom:16px solid transparent;
+  }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  #overlay {
+    position:fixed; inset:0; background:rgba(0,0,0,.9);
+    display:none; align-items:center; justify-content:center; z-index:10;
+  }
+  #overlay.show { display:flex; }
+  #overlay img { max-width:92vw; max-height:92vh; object-fit:contain; }
+</style>
+</head>
+<body>
+  <div id="wrap">
+    <div id="pointer"></div>
+    <canvas id="wheel" width="800" height="800"></canvas>
+  </div>
+  <button id="spin" aria-label="Spin"></button>
+
+  <div id="overlay"><img id="surpriseImg" alt="Surprise!"></div>
+
+<script>
+// ---------- CONFIG ----------
+// Put your image in the same folder and set its filename here:
+const SURPRISE_IMAGE = "surprise.jpg";
+const SURPRISE_MS = 1000; // how long the image shows
+const SURPRISE_CHANCE = 0.05; // 1 in 20
+
+const SLICE_COUNT = 8; // number of red slices
+const colors = ["#d62828", "#a4161a"]; // alternating reds so slices stay distinguishable
+const SURPRISE_COLOR = "#1faa59";
+// ----------------------------
+
+const canvas = document.getElementById("wheel");
+const ctx = canvas.getContext("2d");
+const spinBtn = document.getElementById("spin");
+const overlay = document.getElementById("overlay");
+const img = document.getElementById("surpriseImg");
+
+// Slice layout in degrees, measured clockwise from the top.
+// Surprise gets exactly 5% of the circle, so the wheel itself is the 1/20 chance.
+const surpriseDeg = 360 * SURPRISE_CHANCE;
+const otherDeg = (360 - surpriseDeg) / SLICE_COUNT;
+const slices = [{ start: 0, end: surpriseDeg, color: SURPRISE_COLOR, surprise: true }];
+for (let i = 0; i < SLICE_COUNT; i++) {
+  slices.push({
+    start: surpriseDeg + i * otherDeg,
+    end: surpriseDeg + (i + 1) * otherDeg,
+    color: colors[i % colors.length],
+  });
+}
+
+const rad = d => d * Math.PI / 180;
+let rotation = 0; // degrees, clockwise
+let spinning = false;
+
+function draw() {
+  const c = canvas.width / 2;
+  const r = c - 10;
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  ctx.save();
+  ctx.translate(c, c);
+  ctx.rotate(rad(rotation));
+  slices.forEach(s => {
+    const a0 = rad(s.start - 90), a1 = rad(s.end - 90);
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.arc(0, 0, r, a0, a1);
+    ctx.closePath();
+    ctx.fillStyle = s.color;
+    ctx.fill();
+    ctx.strokeStyle = "#14111f";
+    ctx.lineWidth = s.surprise ? 1 : 3;
+    ctx.stroke();
+  });
+  ctx.restore();
+  // hub
+  ctx.beginPath();
+  ctx.arc(c, c, 26, 0, Math.PI * 2);
+  ctx.fillStyle = "#14111f";
+  ctx.fill();
+}
+
+function sliceAtPointer() {
+  // pointer is at the top; find which wheel angle sits under it
+  const angle = (((360 - rotation) % 360) + 360) % 360;
+  return slices.find(s => angle >= s.start && angle < s.end);
+}
+
+function showSurprise() {
+  img.onerror = () => {
+    // fallback if surprise.jpg isn't found
+    img.onerror = null;
+    img.src = "data:image/svg+xml;utf8," + encodeURIComponent(
+      '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="400">' +
+      '<rect width="400" height="400" fill="#1faa59"/></svg>');
+  };
+  img.src = SURPRISE_IMAGE;
+  overlay.classList.add("show");
+  setTimeout(() => overlay.classList.remove("show"), SURPRISE_MS);
+}
+
+function spin() {
+  if (spinning) return;
+  spinning = true;
+  spinBtn.disabled = true;
+
+  const startRot = rotation;
+  const target = startRot + 360 * 5 + Math.random() * 360; // uniform random landing angle
+  const duration = 4000;
+  const t0 = performance.now();
+
+  function frame(now) {
+    const t = Math.min((now - t0) / duration, 1);
+    const eased = 1 - Math.pow(1 - t, 3);
+    rotation = startRot + (target - startRot) * eased;
+    draw();
+    if (t < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      rotation = target % 360;
+      draw();
+      const s = sliceAtPointer();
+      if (s.surprise) showSurprise();
+      spinning = false;
+      spinBtn.disabled = false;
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+spinBtn.addEventListener("click", spin);
+draw();
+</script>
+</body>
+</html>
